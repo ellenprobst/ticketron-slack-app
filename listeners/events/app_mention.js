@@ -1,4 +1,4 @@
-import { model } from '../../ai/index.js'
+import { rootAgent } from '../../ai/index.js'
 import { feedbackBlock } from '../views/feedback_block.js'
 
 /**
@@ -45,7 +45,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
     })
 
     // Send message history and newest question to LLM
-    const result = await model.generateContentStream(text)
+    const result = await rootAgent.generate(text, { stream: true })
 
     // Stream the LLM response to the channel
     const streamer = client.chatStream({
@@ -55,13 +55,10 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       recipient_user_id: user,
     })
 
-    for await (const chunk of result.stream) {
-      const chunkText = chunk.text()
-      if (chunkText) {
-        await streamer.append({
-          markdown_text: chunkText,
-        })
-      }
+    for await (const chunk of result) {
+      await streamer.append({
+        markdown_text: chunk,
+      })
     }
 
     await streamer.stop({ blocks: [feedbackBlock] })

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { LlmAgent, GOOGLE_SEARCH } from '@google/adk'
 
 // LLM system prompt
 export const DEFAULT_SYSTEM_CONTENT = `You're an assistant in a Slack workspace.
@@ -7,12 +7,10 @@ You'll respond to those questions in a professional way.
 When you include markdown text, convert them to Slack compatible ones.
 When a prompt has Slack's special syntax like <@USER_ID> or <#CHANNEL_ID>, you must keep them as-is in your response.`
 
-// Initialize Google Generative AI client
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
-
-// Get the generative model with Google Search grounding
-export const model = genAI.getGenerativeModel({
+export const rootAgent = new LlmAgent({
+  name: 'search_assistant',
+  description: 'An assistant that can search the web.',
   model: 'gemini-2.0-flash-exp',
-  systemInstruction: DEFAULT_SYSTEM_CONTENT,
-  tools: [{ googleSearch: {} }],
+  instruction: DEFAULT_SYSTEM_CONTENT,
+  tools: [GOOGLE_SEARCH],
 })
