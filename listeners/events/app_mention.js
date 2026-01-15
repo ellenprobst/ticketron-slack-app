@@ -1,5 +1,14 @@
-import { rootAgent } from '../../ai/index.js'
-import { feedbackBlock } from '../views/feedback_block.js'
+import { InMemorySessionService, Runner, stringifyContent } from '@google/adk';
+import { rootAgent } from '../../ai/index.js';
+import { feedbackBlock } from '../views/feedback_block.js';
+
+// Create session service and runner for Google ADK
+const sessionService = new InMemorySessionService();
+const runner = new Runner({
+  appName: 'slack-assistant',
+  agent: rootAgent,
+  sessionService,
+});
 
 /**
  * The `appMentionCallback` event handler allows your app to receive message
@@ -17,8 +26,8 @@ import { feedbackBlock } from '../views/feedback_block.js'
  */
 export const appMentionCallback = async ({ event, client, logger, say }) => {
   try {
-    const { channel, text, team, user } = event
-    const thread_ts = event.thread_ts || event.ts
+    const { channel, text, team, user } = event;
+    const thread_ts = event.thread_ts || event.ts;
 
     // Fetch thread history if this is part of a thread
     if (event.thread_ts) {
@@ -26,8 +35,8 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
         channel,
         ts: thread_ts,
         oldest: thread_ts,
-      })
-      console.log('Thread messages:', JSON.stringify(thread.messages, null, 2))
+      });
+      console.log('Thread messages:', JSON.stringify(thread.messages, null, 2));
     }
 
     // Set the app's loading state while waiting for the LLM response
@@ -42,10 +51,32 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
         'Polishing up the response just for you…',
         'Convincing the AI to stop overthinking…',
       ],
-    })
+    });
 
-    // Send message history and newest question to LLM
-    const result = await rootAgent.generate(text, { stream: true })
+    // Create or get a session for this thread
+    const sessionId = `${channel}-${thread_ts}`;
+    let session = await sessionService.getSession({
+      appName: 'slack-assistant',
+      userId: user,
+      sessionId,
+    });
+    if (!session) {
+      session = await sessionService.createSession({
+        appName: 'slack-assistant',
+        userId: user,
+        sessionId,
+      });
+    }
+
+    // Run the agent with the user's message
+    const events = runner.runAsync({
+      userId: user,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [{ text }],
+      },
+    });
 
     // Stream the LLM response to the channel
     const streamer = client.chatStream({
@@ -53,19 +84,22 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       thread_ts: thread_ts,
       recipient_team_id: team,
       recipient_user_id: user,
-    })
+    });
 
-    for await (const chunk of result) {
-      await streamer.append({
-        markdown_text: chunk,
-      })
+    for await (const event of events) {
+      const content = stringifyContent(event);
+      if (content) {
+        await streamer.append({
+          markdown_text: content,
+        });
+      }
     }
 
-    await streamer.stop({ blocks: [feedbackBlock] })
+    await streamer.stop({ blocks: [feedbackBlock] });
   } catch (e) {
-    logger.error(e)
+    logger.error(e);
 
     // Send message to advise user and clear processing status if a failure occurs
-    await say({ text: `Sorry, something went wrong! ${e}` })
+    await say({ text: `Sorry, something went wrong! ${e}` });
   }
-}
+};
