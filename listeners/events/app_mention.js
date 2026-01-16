@@ -28,7 +28,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
   try {
     const { channel, text, team, user } = event
     const thread_ts = event.thread_ts || event.ts
-
+    let threadMessages = []
     // Fetch thread history if this is part of a thread
     if (event.thread_ts) {
       const thread = await client.conversations.replies({
@@ -36,7 +36,8 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
         ts: thread_ts,
         oldest: thread_ts,
       })
-      console.log('Thread messages:', thread.messages)
+
+      threadMessages = thread.messages || []
     }
 
     // Set the app's loading state while waiting for the LLM response
@@ -68,13 +69,21 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       })
     }
 
+    // Add prior thread messages to user input
+    const userInput =
+      threadMessages
+        .map((message) => `${message.user}: ${message.text}`)
+        .join('\n') +
+      '\n' +
+      text
+
     // Run the agent with the user's message
     const events = runner.runAsync({
       userId: user,
       sessionId: session.id,
       newMessage: {
         role: 'user',
-        parts: [{ text }],
+        parts: [{ text: userInput }],
       },
     })
 
