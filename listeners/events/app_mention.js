@@ -76,12 +76,20 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       )
     }
 
-    // Add prior thread messages to user input only for fresh sessions
+    // We only fetch Slack's thread history on the FIRST interaction (when
+    // session.events is empty) to give ADK the initial context. After that,
+    // ADK remembers the conversation itself. (through InMemorySessionService)
+    //
+    // NOTE: We're using InMemorySessionService, which stores sessions in Node.js
+    // memory. If the app restarts, all session history is lost. However, this isn't
+    // a big problem for us - when a new session starts, we re-fetch the thread
+    // history from Slack (see the isFreshSession check above). The Slack thread
+    // itself acts as our "backup", so the conversation context is always recoverable.
     const threadContext = threadMessages
       .map((message) => `${message.user}: ${message.text}`)
       .join('\n')
     const userInput = threadContext ? `${threadContext}\n${text}` : text
-
+    console.log('[User Input:]', userInput)
     // Run the agent with the user's message
     const events = runner.runAsync({
       userId: user,
