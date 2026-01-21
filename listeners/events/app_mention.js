@@ -28,17 +28,6 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
   try {
     const { channel, text, team, user } = event
     const thread_ts = event.thread_ts || event.ts
-    let threadMessages = []
-    // Fetch thread history if this is part of a thread
-    if (event.thread_ts) {
-      const thread = await client.conversations.replies({
-        channel,
-        ts: thread_ts,
-        oldest: thread_ts,
-      })
-
-      threadMessages = thread.messages || []
-    }
 
     // Set the app's loading state while waiting for the LLM response
     await client.assistant.threads.setStatus({
@@ -69,13 +58,29 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       })
     }
 
-    // Add prior thread messages to user input
-    const userInput =
-      threadMessages
-        .map((message) => `${message.user}: ${message.text}`)
-        .join('\n') +
-      '\n' +
-      text
+    // Check if session is fresh (no prior conversation history)
+    const isFreshSession = session.events.length === 0
+
+    // Only fetch thread history if session is fresh AND we're in a thread
+    // This avoids sending duplicate context when ADK already has the conversation history
+    let threadMessages = []
+    if (isFreshSession && event.thread_ts) {
+      const thread = await client.conversations.replies({
+        channel,
+        ts: thread_ts,
+        oldest: thread_ts,
+      })
+      // Exclude current message to avoid duplication
+      threadMessages = (thread.messages || []).filter(
+        (msg) => msg.ts !== event.ts,
+      )
+    }
+
+    // Add prior thread messages to user input only for fresh sessions
+    const threadContext = threadMessages
+      .map((message) => `${message.user}: ${message.text}`)
+      .join('\n')
+    const userInput = threadContext ? `${threadContext}\n${text}` : text
 
     // Run the agent with the user's message
     const events = runner.runAsync({
