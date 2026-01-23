@@ -1,4 +1,4 @@
-import { BaseLlm, LLMRegistry } from '@google/adk'
+import { BaseLlm, LLMRegistry } from '@google/adk';
 
 /**
  * OpenRouter LLM implementation for Google ADK.
@@ -6,46 +6,44 @@ import { BaseLlm, LLMRegistry } from '@google/adk'
  */
 export class OpenRouterLlm extends BaseLlm {
   static get supportedModels() {
-    return [/^openrouter\/.*/]
+    return [/^openrouter\/.*/];
   }
 
   constructor({ model }) {
-    super({ model })
-    this.apiKey = process.env.OPENROUTER_API_KEY
-    this.baseUrl =
-      process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'
+    super({ model });
+    this.apiKey = process.env.OPENROUTER_API_KEY;
+    this.baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
     // Strip 'openrouter/' prefix to get the actual model name
-    this.openRouterModel = model.replace(/^openrouter\//, '')
+    this.openRouterModel = model.replace(/^openrouter\//, '');
   }
 
   /**
    * Convert Google Content format to OpenAI messages format.
    */
   convertToOpenAIMessages(contents, systemInstruction) {
-    const messages = []
+    const messages = [];
 
     // Add system instruction if present
     if (systemInstruction) {
       const systemText =
         typeof systemInstruction === 'string'
           ? systemInstruction
-          : systemInstruction.parts?.map((p) => p.text).join('\n') || ''
+          : systemInstruction.parts?.map((p) => p.text).join('\n') || '';
       if (systemText) {
-        messages.push({ role: 'system', content: systemText })
+        messages.push({ role: 'system', content: systemText });
       }
     }
 
     // Convert each content to a message
     for (const content of contents) {
-      const role = content.role === 'model' ? 'assistant' : content.role
-      const textParts =
-        content.parts?.filter((p) => p.text).map((p) => p.text) || []
+      const role = content.role === 'model' ? 'assistant' : content.role;
+      const textParts = content.parts?.filter((p) => p.text).map((p) => p.text) || [];
       if (textParts.length > 0) {
-        messages.push({ role, content: textParts.join('\n') })
+        messages.push({ role, content: textParts.join('\n') });
       }
     }
 
-    return messages
+    return messages;
   }
 
   /**
@@ -53,10 +51,10 @@ export class OpenRouterLlm extends BaseLlm {
    */
   convertToOpenAITools(toolsDict) {
     if (!toolsDict || Object.keys(toolsDict).length === 0) {
-      return undefined
+      return undefined;
     }
 
-    const tools = []
+    const tools = [];
     for (const [name, tool] of Object.entries(toolsDict)) {
       if (tool.declaration) {
         tools.push({
@@ -69,28 +67,28 @@ export class OpenRouterLlm extends BaseLlm {
               properties: {},
             },
           },
-        })
+        });
       }
     }
 
-    return tools.length > 0 ? tools : undefined
+    return tools.length > 0 ? tools : undefined;
   }
 
   /**
    * Convert OpenAI response to Google LlmResponse format.
    */
   convertToLlmResponse(chunk, isStreaming = false) {
-    const choice = chunk.choices?.[0]
+    const choice = chunk.choices?.[0];
     if (!choice) {
-      return { content: undefined }
+      return { content: undefined };
     }
 
-    const delta = isStreaming ? choice.delta : choice.message
-    const parts = []
+    const delta = isStreaming ? choice.delta : choice.message;
+    const parts = [];
 
     // Handle text content
     if (delta?.content) {
-      parts.push({ text: delta.content })
+      parts.push({ text: delta.content });
     }
 
     // Handle tool calls
@@ -100,16 +98,14 @@ export class OpenRouterLlm extends BaseLlm {
           parts.push({
             functionCall: {
               name: toolCall.function.name,
-              args: toolCall.function.arguments
-                ? JSON.parse(toolCall.function.arguments)
-                : {},
+              args: toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {},
             },
-          })
+          });
         }
       }
     }
 
-    const finishReason = choice.finish_reason
+    const finishReason = choice.finish_reason;
 
     return {
       content: parts.length > 0 ? { role: 'model', parts } : undefined,
@@ -123,18 +119,18 @@ export class OpenRouterLlm extends BaseLlm {
             totalTokenCount: chunk.usage.total_tokens,
           }
         : undefined,
-    }
+    };
   }
 
   /**
    * Generates content from OpenRouter API.
    */
   async *generateContentAsync(llmRequest, stream = false) {
-    const messages = this.convertToOpenAIMessages(
-      llmRequest.contents,
-      llmRequest.config?.systemInstruction
-    )
-    const tools = this.convertToOpenAITools(llmRequest.toolsDict)
+    const messages = this.convertToOpenAIMessages(llmRequest.contents, llmRequest.config?.systemInstruction);
+    const tools = this.convertToOpenAITools(llmRequest.toolsDict);
+
+    // Debug logging
+    console.log('[OpenRouter] Tools available:', tools ? tools.map((t) => t.function.name) : 'none');
 
     const body = {
       model: this.openRouterModel,
@@ -147,7 +143,7 @@ export class OpenRouterLlm extends BaseLlm {
       ...(llmRequest.config?.maxOutputTokens && {
         max_tokens: llmRequest.config.maxOutputTokens,
       }),
-    }
+    };
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -158,41 +154,41 @@ export class OpenRouterLlm extends BaseLlm {
         'X-Title': 'Slack Assistant',
       },
       body: JSON.stringify(body),
-    })
+    });
 
     if (!response.ok) {
-      const error = await response.text()
-      console.log('[OpenRouter] Error response:', error)
+      const error = await response.text();
+      console.log('[OpenRouter] Error response:', error);
       yield {
         errorCode: response.status.toString(),
         errorMessage: `OpenRouter API error: ${error}`,
-      }
-      return
+      };
+      return;
     }
 
     if (stream) {
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const { done, value } = await reader.read();
+        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
-          const trimmed = line.trim()
+          const trimmed = line.trim();
           if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6)
+            const data = trimmed.slice(6);
             if (data === '[DONE]') {
-              return
+              return;
             }
             try {
-              const chunk = JSON.parse(data)
-              yield this.convertToLlmResponse(chunk, true)
+              const chunk = JSON.parse(data);
+              yield this.convertToLlmResponse(chunk, true);
             } catch {
               // Skip invalid JSON
             }
@@ -200,10 +196,10 @@ export class OpenRouterLlm extends BaseLlm {
         }
       }
     } else {
-      const data = await response.json()
-      const llmResponse = this.convertToLlmResponse(data, false)
+      const data = await response.json();
+      const llmResponse = this.convertToLlmResponse(data, false);
 
-      yield llmResponse
+      yield llmResponse;
     }
   }
 
@@ -211,9 +207,9 @@ export class OpenRouterLlm extends BaseLlm {
    * Live connections not supported for OpenRouter.
    */
   async connect(_llmRequest) {
-    throw new Error('Live connections are not supported for OpenRouter')
+    throw new Error('Live connections are not supported for OpenRouter');
   }
 }
 
 // Register the OpenRouter LLM with the registry
-LLMRegistry.register(OpenRouterLlm)
+LLMRegistry.register(OpenRouterLlm);
