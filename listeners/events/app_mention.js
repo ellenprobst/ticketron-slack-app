@@ -89,7 +89,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       .map((message) => `${message.user}: ${message.text}`)
       .join('\n')
     const userInput = threadContext ? `${threadContext}\n${text}` : text
-    console.log('[User Input:]', userInput)
+
     // Run the agent with the user's message
     const events = runner.runAsync({
       userId: user,
