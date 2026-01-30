@@ -1,5 +1,15 @@
 import { BaseLlm, LLMRegistry } from '@google/adk';
 
+// Only include the Jira tools needed for ticket creation to stay within token limits
+const ALLOWED_TOOLS = new Set([
+  'createJiraIssue',
+  'getVisibleJiraProjects',
+  'getJiraProjectIssueTypesMetadata',
+  'searchJiraIssuesUsingJql',
+  'editJiraIssue',
+  'getJiraIssue',
+]);
+
 /**
  * OpenRouter LLM implementation for Google ADK.
  * Translates between Google's Content format and OpenAI-compatible API.
@@ -37,7 +47,44 @@ export class OpenRouterLlm extends BaseLlm {
     // Convert each content to a message
     for (const content of contents) {
       const role = content.role === 'model' ? 'assistant' : content.role;
-      const textParts = content.parts?.filter((p) => p.text).map((p) => p.text) || [];
+      const parts = content.parts || [];
+
+      // Check if this content contains function calls (tool use by the assistant)
+      const functionCalls = parts.filter((p) => p.functionCall);
+      if (functionCalls.length > 0) {
+        const textParts = parts.filter((p) => p.text).map((p) => p.text);
+        messages.push({
+          role: 'assistant',
+          content: textParts.length > 0 ? textParts.join('\n') : null,
+          tool_calls: functionCalls.map((p, i) => ({
+            id: `call_${p.functionCall.name}_${i}`,
+            type: 'function',
+            function: {
+              name: p.functionCall.name,
+              arguments: JSON.stringify(p.functionCall.args || {}),
+            },
+          })),
+        });
+        continue;
+      }
+
+      // Check if this content contains function responses (tool results)
+      const functionResponses = parts.filter((p) => p.functionResponse);
+      if (functionResponses.length > 0) {
+        for (const p of functionResponses) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: `call_${p.functionResponse.name}_0`,
+            content: typeof p.functionResponse.response === 'string'
+              ? p.functionResponse.response
+              : JSON.stringify(p.functionResponse.response),
+          });
+        }
+        continue;
+      }
+
+      // Regular text message
+      const textParts = parts.filter((p) => p.text).map((p) => p.text);
       if (textParts.length > 0) {
         messages.push({ role, content: textParts.join('\n') });
       }
@@ -56,16 +103,29 @@ export class OpenRouterLlm extends BaseLlm {
 
     const tools = [];
     for (const [name, tool] of Object.entries(toolsDict)) {
-      if (tool.declaration) {
+      // Filter to only allowed tools to stay within token limits
+      if (ALLOWED_TOOLS.size > 0 && !ALLOWED_TOOLS.has(name)) {
+        continue;
+      }
+      // MCP tools have a .mcpTool with the raw MCP schema (name, description, inputSchema).
+      // We use that directly since ADK's _getDeclaration() crashes on schemas with missing type fields.
+      const mcpTool = tool.mcpTool;
+      if (mcpTool) {
+        tools.push({
+          type: 'function',
+          function: {
+            name: mcpTool.name || name,
+            description: mcpTool.description || '',
+            parameters: mcpTool.inputSchema || { type: 'object', properties: {} },
+          },
+        });
+      } else if (tool.declaration) {
         tools.push({
           type: 'function',
           function: {
             name: tool.declaration.name || name,
             description: tool.declaration.description || '',
-            parameters: tool.declaration.parameters || {
-              type: 'object',
-              properties: {},
-            },
+            parameters: tool.declaration.parameters || { type: 'object', properties: {} },
           },
         });
       }
@@ -106,12 +166,13 @@ export class OpenRouterLlm extends BaseLlm {
     }
 
     const finishReason = choice.finish_reason;
+    const isComplete = finishReason === 'stop' || finishReason === 'tool_calls';
 
     return {
       content: parts.length > 0 ? { role: 'model', parts } : undefined,
-      partial: isStreaming && finishReason !== 'stop',
-      turnComplete: finishReason === 'stop',
-      finishReason: finishReason === 'stop' ? 'STOP' : undefined,
+      partial: isStreaming && !isComplete,
+      turnComplete: isComplete,
+      finishReason: isComplete ? 'STOP' : undefined,
       usageMetadata: chunk.usage
         ? {
             promptTokenCount: chunk.usage.prompt_tokens,
@@ -129,8 +190,9 @@ export class OpenRouterLlm extends BaseLlm {
     const messages = this.convertToOpenAIMessages(llmRequest.contents, llmRequest.config?.systemInstruction);
     const tools = this.convertToOpenAITools(llmRequest.toolsDict);
 
-    // Debug logging
     console.log('[OpenRouter] Tools available:', tools ? tools.map((t) => t.function.name) : 'none');
+    console.log('[OpenRouter] Messages count:', messages.length, 'Roles:', messages.map((m) => m.role));
+    console.log('[OpenRouter] Calling API...');
 
     const body = {
       model: this.openRouterModel,
@@ -155,6 +217,8 @@ export class OpenRouterLlm extends BaseLlm {
       },
       body: JSON.stringify(body),
     });
+
+    console.log('[OpenRouter] API responded:', response.status);
 
     if (!response.ok) {
       const error = await response.text();

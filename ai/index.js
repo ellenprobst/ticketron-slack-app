@@ -3,21 +3,27 @@ import { LlmAgent, MCPToolset } from '@google/adk'
 import './openrouter_llm.js'
 
 // Create MCP toolset for Atlassian (official remote MCP server)
-// Temporarily disabled to debug - uncomment when MCP is working
-// const atlassianToolset = new MCPToolset({
-//   type: 'StdioConnectionParams',
-//   serverParams: {
-//     command: 'npx',
-//     args: ['-y', 'mcp-remote', 'https://mcp.atlassian.com/v1/sse'],
-//   },
-//   timeout: 30,
-// })
+const atlassianToolset = new MCPToolset({
+  type: 'StdioConnectionParams',
+  serverParams: {
+    command: 'npx',
+    args: ['-y', 'mcp-remote', 'https://mcp.atlassian.com/v1/sse'],
+    env: {
+      ATLASSIAN_WORKSPACE: 'ticketron-team',
+      ATLASSIAN_PROJECT_KEY: 'SCRUM',
+      ATLASSIAN_SITE_URL: 'https://ticketron-play.atlassian.net',
+    },
+  },
+  timeout: 30,
+})
 
-// Single agent - MCP tools disabled for now
 export const rootAgent = new LlmAgent({
   name: 'ticketron',
   model: 'openrouter/anthropic/claude-sonnet-4',
-  // tools: [atlassianToolset],  // Uncomment when MCP is working
+  tools: [atlassianToolset],
+  generateContentConfig: {
+    maxOutputTokens: 60000,
+  },
   instruction: `You are Ticketron, a Slack assistant that helps teams create Jira tickets.
 
 ## Capabilities
@@ -31,7 +37,8 @@ export const rootAgent = new LlmAgent({
 2. Generate a ticket draft with title, description, priority
 3. Show preview and ask for confirmation
 4. Only create the ticket after explicit confirmation ("create it", "yes", "confirm")
-5. After creating, search for matching epics and assign if appropriate
+5. Before creating, search for matching epics in the project and set the parent if a match is found
+6. Use the Jira tools to create the issue (with the parent epic set if one matched)
 
 ## Preview Format
 **Ticket Preview**
@@ -40,15 +47,21 @@ export const rootAgent = new LlmAgent({
 **Priority:** [inferred priority]
 **Assignee:** [if mentioned, otherwise "Unassigned"]
 
+
+
 _Reply with edits or say "create it" when ready_
+
+## After Creating a Ticket
+- Always include the direct link to the created Jira ticket using the URL returned by the API — never make up a ticket key or URL
+- If ticket creation fails, tell the user what went wrong and suggest next steps
 
 ## Important
 - Always show preview before creating
 - Handle edits naturally ("change title to X", "assign to Sarah", "make it a bug")
 - On cancel/nevermind → acknowledge and stop
 - For non-ticket requests → respond helpfully as a normal assistant
-- When Jira tools are available, use them to search projects, create issues, and assign epics
-- For now, simulate the ticket creation flow (preview → confirm → created)
+- Use the Jira tools to search projects, create issues, and assign epics
+- If a tool call fails, explain the error to the user instead of silently continuing
 
 ## Stage Markers (REQUIRED)
 At the END of every response, include a stage marker on its own line:
