@@ -1,4 +1,4 @@
-import { runAgentWithMessage } from '../events/app_mention.js';
+import { runAgentWithMessage } from '../events/app_mention.js'
 
 /**
  * Handles the "Create Ticket" button click.
@@ -12,24 +12,26 @@ import { runAgentWithMessage } from '../events/app_mention.js';
  */
 export const confirmTicketCallback = async ({ ack, body, client, logger }) => {
   try {
-    await ack();
-
+    await ack()
+    console.log({ body })
     if (body.type !== 'block_actions') {
-      return;
+      return
     }
 
-    const channel = body.channel.id;
-    const message = /** @type {any} */ (body).message;
-    const thread_ts = message.thread_ts || message.ts;
-    const user = body.user.id;
+    const channel = body.channel.id
+    const message = /** @type {any} */ (body).message
+    const thread_ts = message.thread_ts || message.ts
+    const user = body.user.id
 
     // Remove buttons from message
     await client.chat.update({
       channel,
       ts: message.ts,
       text: message.text,
-      blocks: message.blocks.filter((/** @type {any} */ b) => b.type !== 'actions'),
-    });
+      blocks: message.blocks.filter(
+        (/** @type {any} */ b) => b.type !== 'actions',
+      ),
+    })
 
     // Send confirmation to agent (it has the draft in session memory)
     await runAgentWithMessage({
@@ -38,8 +40,9 @@ export const confirmTicketCallback = async ({ ack, body, client, logger }) => {
       user,
       text: 'create it',
       client,
-    });
+      team: body.user.team_id,
+    })
   } catch (error) {
-    logger.error(`:warning: Error confirming ticket: ${error}`);
+    logger.error(`:warning: Error confirming ticket: ${error}`)
   }
-};
+}

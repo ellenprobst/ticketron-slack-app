@@ -1,15 +1,5 @@
 import { BaseLlm, LLMRegistry } from '@google/adk';
 
-// Only include the Jira tools needed for ticket creation to stay within token limits
-const ALLOWED_TOOLS = new Set([
-  'createJiraIssue',
-  'getVisibleJiraProjects',
-  'getJiraProjectIssueTypesMetadata',
-  'searchJiraIssuesUsingJql',
-  'editJiraIssue',
-  'getJiraIssue',
-]);
-
 /**
  * OpenRouter LLM implementation for Google ADK.
  * Translates between Google's Content format and OpenAI-compatible API.
@@ -103,10 +93,6 @@ export class OpenRouterLlm extends BaseLlm {
 
     const tools = [];
     for (const [name, tool] of Object.entries(toolsDict)) {
-      // Filter to only allowed tools to stay within token limits
-      if (ALLOWED_TOOLS.size > 0 && !ALLOWED_TOOLS.has(name)) {
-        continue;
-      }
       // MCP tools have a .mcpTool with the raw MCP schema (name, description, inputSchema).
       // We use that directly since ADK's _getDeclaration() crashes on schemas with missing type fields.
       const mcpTool = tool.mcpTool;

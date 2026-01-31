@@ -8,13 +8,16 @@ const atlassianToolset = new MCPToolset({
   serverParams: {
     command: 'npx',
     args: ['-y', 'mcp-remote', 'https://mcp.atlassian.com/v1/sse'],
-    env: {
-      ATLASSIAN_WORKSPACE: 'ticketron-team',
-      ATLASSIAN_PROJECT_KEY: 'SCRUM',
-      ATLASSIAN_SITE_URL: 'https://ticketron-play.atlassian.net',
-    },
   },
   timeout: 30,
+  toolFilter: [
+    'createJiraIssue',
+    'getVisibleJiraProjects',
+    'getJiraProjectIssueTypesMetadata',
+    'searchJiraIssuesUsingJql',
+    'editJiraIssue',
+    'getJiraIssue',
+  ],
 })
 
 export const rootAgent = new LlmAgent({
@@ -47,6 +50,9 @@ export const rootAgent = new LlmAgent({
 **Priority:** [inferred priority]
 **Assignee:** [if mentioned, otherwise "Unassigned"]
 
+## Jira Configuration
+  - cloudId: https://ticketron.atlassian.net
+  - Default project key: KAN
 
 
 _Reply with edits or say "create it" when ready_

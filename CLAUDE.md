@@ -20,6 +20,7 @@ For development with Slack CLI: `slack run`
 ## Architecture
 
 ### Entry Point & Event Flow
+
 1. `app.js` - Initializes Bolt app with Socket Mode
 2. `listeners/index.js` - Registers three listener categories:
    - `assistant/*` - Assistant container interactions (DMs, threads)
@@ -28,28 +29,31 @@ For development with Slack CLI: `slack run`
 3. `ai/index.js` - Google ADK agent with OpenRouter backend
 
 ### Assistant Registration Pattern
+
 ```javascript
 const assistant = new Assistant({
   threadStarted: assistantThreadStarted,
   threadContextChanged: assistantThreadContextChanged,
   userMessage: message,
-});
-app.assistant(assistant);
+})
+app.assistant(assistant)
 ```
 
 ### Streaming Response Pattern
+
 ```javascript
-const result = await rootAgent.run(text);
-const streamer = client.chatStream({ channel, thread_ts });
+const result = await rootAgent.run(text)
+const streamer = client.chatStream({ channel, thread_ts })
 for await (const chunk of result) {
-  await streamer.append({ markdown_text: chunk });
+  await streamer.append({ markdown_text: chunk })
 }
-await streamer.stop({ blocks: [feedbackBlock] });
+await streamer.stop({ blocks: [feedbackBlock] })
 ```
 
 ## Environment Variables
 
 Required in `.env`:
+
 - `SLACK_BOT_TOKEN` - Bot User OAuth Token (xoxb-)
 - `SLACK_APP_TOKEN` - App-Level Token with `connections:write` (xapp-)
 - `OPENROUTER_API_KEY` - OpenRouter API key
@@ -69,3 +73,7 @@ Required in `.env`:
 - `client.assistant.threads.setTitle()` - Set thread title from first message
 - `client.chatStream()` - Stream responses (use instead of `chat.postMessage` for LLM output)
 - `saveThreadContext()` / `getThreadContext()` - Persist thread context when channel changes
+
+## Rules
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
