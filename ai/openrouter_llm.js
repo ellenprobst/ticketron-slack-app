@@ -65,9 +65,10 @@ export class OpenRouterLlm extends BaseLlm {
           messages.push({
             role: 'tool',
             tool_call_id: `call_${p.functionResponse.name}_0`,
-            content: typeof p.functionResponse.response === 'string'
-              ? p.functionResponse.response
-              : JSON.stringify(p.functionResponse.response),
+            content:
+              typeof p.functionResponse.response === 'string'
+                ? p.functionResponse.response
+                : JSON.stringify(p.functionResponse.response),
           });
         }
         continue;
@@ -177,7 +178,12 @@ export class OpenRouterLlm extends BaseLlm {
     const tools = this.convertToOpenAITools(llmRequest.toolsDict);
 
     console.log('[OpenRouter] Tools available:', tools ? tools.map((t) => t.function.name) : 'none');
-    console.log('[OpenRouter] Messages count:', messages.length, 'Roles:', messages.map((m) => m.role));
+    console.log(
+      '[OpenRouter] Messages count:',
+      messages.length,
+      'Roles:',
+      messages.map((m) => m.role),
+    );
     console.log('[OpenRouter] Calling API...');
 
     const body = {

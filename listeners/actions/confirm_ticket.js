@@ -13,7 +13,7 @@ import { runAgentWithMessage } from '../events/app_mention.js'
 export const confirmTicketCallback = async ({ ack, body, client, logger }) => {
   try {
     await ack()
-    console.log({ body })
+
     if (body.type !== 'block_actions') {
       return
     }

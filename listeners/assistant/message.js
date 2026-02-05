@@ -111,9 +111,6 @@ export const message = async ({
         input: `System: ${DEFAULT_SYSTEM_CONTENT}\n\nUser: ${llmPrompt}`,
         stream: true,
       })
-      console.log(
-        '------------------------------------------------------------------------------------',
-      )
       // Provide a response to the user
       const streamer = client.chatStream({
         channel: channel,

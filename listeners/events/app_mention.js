@@ -1,15 +1,29 @@
 import { InMemorySessionService, Runner, stringifyContent } from '@google/adk'
-import { rootAgent } from '../../ai/index.js'
+import { getAgent } from '../../ai/index.js'
 import { feedbackBlock } from '../views/feedback_block.js'
 import { ticketActionsBlock } from '../views/ticket_actions.js'
 
-// Create session service and runner for Google ADK
+// Session service for Google ADK (created immediately - no external deps)
 const sessionService = new InMemorySessionService()
-const runner = new Runner({
-  appName: 'slack-assistant',
-  agent: rootAgent,
-  sessionService,
-})
+
+// Runner created lazily on first use (waits for MCP connection)
+let runner = null
+
+/**
+ * Get the runner, creating it lazily on first use.
+ * @returns {Promise<Runner>}
+ */
+async function getRunner() {
+  if (!runner) {
+    const agent = await getAgent()
+    runner = new Runner({
+      appName: 'slack-assistant',
+      agent,
+      sessionService,
+    })
+  }
+  return runner
+}
 
 /**
  * Runs the agent with a message and streams the response.
@@ -74,9 +88,10 @@ export async function runAgentWithMessage({
         `[runAgentWithMessage] Reusing existing session: ${sessionId}`,
       )
     }
-
+    console.log({ text })
     // Run the agent with the user's message
-    const events = runner.runAsync({
+    const agentRunner = await getRunner()
+    const events = agentRunner.runAsync({
       userId: user,
       sessionId: session.id,
       newMessage: {
@@ -97,7 +112,10 @@ export async function runAgentWithMessage({
 
       if (content) {
         fullResponse = content
-        const status = content.replace(/\*\*/g, '').replace(/\n/g, ' ').slice(0, 100)
+        const status = content
+          .replace(/\*\*/g, '')
+          .replace(/\n/g, ' ')
+          .slice(0, 100)
         await client.assistant.threads.setStatus({
           channel_id: channel,
           thread_ts: thread_ts,
@@ -106,38 +124,60 @@ export async function runAgentWithMessage({
       }
     }
 
-    // Stream the final response (last content event) to the channel
+    // Parse the JSON response from the agent
+    let agentResponse
+    try {
+      agentResponse = JSON.parse(fullResponse)
+    } catch {
+      // Fallback for non-JSON responses
+      console.log(
+        '\x1b[33m%s\x1b[0m',
+        '[runAgentWithMessage] Response is not valid JSON, treating as chat',
+      )
+      agentResponse = { stage: 'chat', message: fullResponse }
+    }
+
+    const { stage = 'chat', message, ticket } = agentResponse
+    const displayMessage = message || fullResponse
+
+    console.log(
+      '\x1b[34m%s\x1b[0m',
+      `[runAgentWithMessage] Stage: ${stage}, Message: "${displayMessage.slice(0, 100)}${displayMessage.length > 100 ? '…' : ''}"`,
+    )
+    if (ticket) {
+      console.log(
+        '\x1b[35m%s\x1b[0m',
+        `[runAgentWithMessage] Ticket draft: ${ticket.title}`,
+      )
+    }
+
+    // Stream the message (not the raw JSON) to the channel
     const streamer = client.chatStream({
       channel: channel,
       thread_ts: thread_ts,
       recipient_team_id: team,
       recipient_user_id: user,
     })
-    await streamer.append({ markdown_text: fullResponse })
+    await streamer.append({ markdown_text: displayMessage })
 
-    console.log(
-      '\x1b[34m%s\x1b[0m',
-      `[runAgentWithMessage] Full response (${fullResponse.length} chars): "${fullResponse.slice(0, 200)}${fullResponse.length > 200 ? '…' : ''}"`,
-    )
-
-    // Parse stage marker from response (e.g., [STAGE:preview])
-    const stageMatch = fullResponse.match(/\[STAGE:(\w+)\]/)
-    const stage = stageMatch ? stageMatch[1] : 'chat'
-    console.log(
-      '\x1b[33m%s\x1b[0m',
-      `[runAgentWithMessage] Detected stage: ${stage}`,
-    )
-
-    // Show Create/Cancel buttons only when in preview stage
-    const blocks =
-      stage === 'preview'
-        ? [ticketActionsBlock(sessionId), feedbackBlock]
-        : [feedbackBlock]
+    // Show Create/Cancel buttons only when in draft stage
+    // Pass ticket data in the button value for the modal
+    let blocks
+    if (stage === 'draft' && ticket) {
+      const buttonData = JSON.stringify({ sessionId, ticket })
+      console.log(
+        '\x1b[36m%s\x1b[0m',
+        `[runAgentWithMessage] Adding ticket action buttons with data: ${buttonData}`,
+      )
+      blocks = [ticketActionsBlock(buttonData), feedbackBlock]
+    } else {
+      blocks = [feedbackBlock]
+    }
 
     await streamer.stop({ blocks })
     console.log(
       '\x1b[32m%s\x1b[0m',
-      `[runAgentWithMessage] Done — response streamed successfully`,
+      `[runAgentWithMessage] Done — stage: ${stage}`,
     )
   } catch (error) {
     console.log(
@@ -181,6 +221,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       '\x1b[90m%s\x1b[0m',
       `[appMention] thread_ts=${thread_ts} (isThread=${!!event.thread_ts})`,
     )
+    console.log({ event })
     // Create or get a session for this thread
     const sessionId = `${channel}-${thread_ts}`
     let session = await sessionService.getSession({
@@ -212,6 +253,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
         ts: thread_ts,
         oldest: thread_ts,
       })
+
       // Exclude current message to avoid duplication
       threadMessages = (thread.messages || []).filter(
         (msg) => msg.ts !== event.ts,
