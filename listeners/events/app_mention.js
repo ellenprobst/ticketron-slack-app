@@ -36,6 +36,7 @@ async function getRunner() {
  * @param {string} params.text - The message text.
  * @param {import("@slack/web-api").WebClient} params.client - Slack web client.
  * @param {string} [params.team] - The team ID.
+ * @param {Array<{mimeType: string, data: string}>} [params.images] - Base64-encoded images.
  */
 export async function runAgentWithMessage({
   channel,
@@ -44,6 +45,7 @@ export async function runAgentWithMessage({
   text,
   client,
   team,
+  images,
 }) {
   try {
     console.log(
@@ -88,15 +90,21 @@ export async function runAgentWithMessage({
         `[runAgentWithMessage] Reusing existing session: ${sessionId}`,
       )
     }
-    console.log({ text })
     // Run the agent with the user's message
     const agentRunner = await getRunner()
+    /** @type {Array<Object>} */
+    const parts = [{ text: text || 'Describe this image' }]
+    if (images?.length) {
+      for (const img of images) {
+        parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+      }
+    }
     const events = agentRunner.runAsync({
       userId: user,
       sessionId: session.id,
       newMessage: {
         role: 'user',
-        parts: [{ text }],
+        parts,
       },
     })
     // Process agent events: show each intermediate step as a status update,
@@ -277,9 +285,51 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       .map((message) => `${message.user}: ${message.text}`)
       .join('\n')
     const userInput = threadContext ? `${threadContext}\n${text}` : text
+
+    // Download supported image attachments (screenshots, photos — not GIFs)
+    // Cast needed: @slack/types defines files as { id: string }[] but runtime objects include full file metadata
+    const supportedImageTypes = new Set([
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+    ])
+    /** @type {Array<{mimetype: string, url_private: string, name: string}>} */
+    const files = /** @type {any} */ (event.files || [])
+    const imageFiles = files.filter((f) => supportedImageTypes.has(f.mimetype))
+    /** @type {Array<{mimeType: string, data: string}>} */
+    const images = []
+    for (const file of imageFiles) {
+      try {
+        const resp = await fetch(file.url_private, {
+          headers: { Authorization: `Bearer ${client.token}` },
+        })
+        if (!resp.ok) {
+          console.log(
+            '\x1b[33m%s\x1b[0m',
+            `[appMention] Failed to download file ${file.name}: ${resp.status}`,
+          )
+          continue
+        }
+        const buffer = await resp.arrayBuffer()
+        images.push({
+          mimeType: file.mimetype,
+          data: Buffer.from(buffer).toString('base64'),
+        })
+        console.log(
+          '\x1b[32m%s\x1b[0m',
+          `[appMention] Downloaded image: ${file.name} (${file.mimetype})`,
+        )
+      } catch (err) {
+        console.log(
+          '\x1b[33m%s\x1b[0m',
+          `[appMention] Error downloading file ${file.name}: ${err.message}`,
+        )
+      }
+    }
+
     console.log(
       '\x1b[34m%s\x1b[0m',
-      `[appMention] Calling runAgentWithMessage (inputLength=${userInput.length})`,
+      `[appMention] Calling runAgentWithMessage (inputLength=${userInput.length}, images=${images.length})`,
     )
 
     await runAgentWithMessage({
@@ -289,6 +339,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       text: userInput,
       client,
       team,
+      images: images.length > 0 ? images : undefined,
     })
   } catch (e) {
     console.log('\x1b[31m%s\x1b[0m', `[appMention] ERROR: ${e.message}`)
