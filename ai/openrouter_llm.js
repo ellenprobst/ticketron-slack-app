@@ -44,17 +44,27 @@ export class OpenRouterLlm extends BaseLlm {
       const functionCalls = parts.filter((p) => p.functionCall)
       if (functionCalls.length > 0) {
         const textParts = parts.filter((p) => p.text).map((p) => p.text)
+        // Track per-name call count so IDs match the corresponding response IDs.
+        // Using name+count (not a global index) ensures responses can reconstruct
+        // the same ID without needing to know the global position.
+        /** @type {Record<string, number>} */
+        const callNameCount = {}
         messages.push({
           role: 'assistant',
           content: textParts.length > 0 ? textParts.join('\n') : null,
-          tool_calls: functionCalls.map((p, i) => ({
-            id: `call_${p.functionCall.name}_${i}`,
-            type: 'function',
-            function: {
-              name: p.functionCall.name,
-              arguments: JSON.stringify(p.functionCall.args || {}),
-            },
-          })),
+          tool_calls: functionCalls.map((p) => {
+            const name = p.functionCall.name
+            const count = callNameCount[name] ?? 0
+            callNameCount[name] = count + 1
+            return {
+              id: `call_${name}_${count}`,
+              type: 'function',
+              function: {
+                name,
+                arguments: JSON.stringify(p.functionCall.args || {}),
+              },
+            }
+          }),
         })
         continue
       }
@@ -62,10 +72,17 @@ export class OpenRouterLlm extends BaseLlm {
       // Check if this content contains function responses (tool results)
       const functionResponses = parts.filter((p) => p.functionResponse)
       if (functionResponses.length > 0) {
+        // Mirror the per-name counter used when building function calls above
+        // so tool_call_id values always match their originating call ID.
+        /** @type {Record<string, number>} */
+        const responseNameCount = {}
         for (const p of functionResponses) {
+          const name = p.functionResponse.name
+          const count = responseNameCount[name] ?? 0
+          responseNameCount[name] = count + 1
           messages.push({
             role: 'tool',
-            tool_call_id: `call_${p.functionResponse.name}_0`,
+            tool_call_id: `call_${name}_${count}`,
             content:
               typeof p.functionResponse.response === 'string'
                 ? p.functionResponse.response
@@ -170,12 +187,23 @@ export class OpenRouterLlm extends BaseLlm {
     if (delta?.tool_calls) {
       for (const toolCall of delta.tool_calls) {
         if (toolCall.function) {
+          let args = {}
+          if (toolCall.function.arguments) {
+            try {
+              args = JSON.parse(toolCall.function.arguments)
+            } catch {
+              // Streaming can deliver partial JSON across chunks; skip malformed args
+              console.log(
+                '[OpenRouter] Could not parse tool arguments for',
+                toolCall.function.name,
+                '— skipping',
+              )
+            }
+          }
           parts.push({
             functionCall: {
               name: toolCall.function.name,
-              args: toolCall.function.arguments
-                ? JSON.parse(toolCall.function.arguments)
-                : {},
+              args,
             },
           })
         }
@@ -220,7 +248,15 @@ export class OpenRouterLlm extends BaseLlm {
       'Roles:',
       messages.map((m) => m.role),
     )
-    console.log('[OpenRouter] Calling API...')
+
+    // Check if any message contains image content
+    const hasImages = messages.some(
+      (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'),
+    )
+
+    if (hasImages) {
+      console.log('[OpenRouter] Vision request detected — excluding Bedrock provider')
+    }
 
     const body = {
       model: this.openRouterModel,
@@ -233,15 +269,21 @@ export class OpenRouterLlm extends BaseLlm {
       ...(llmRequest.config?.maxOutputTokens && {
         max_tokens: llmRequest.config.maxOutputTokens,
       }),
+      // Exclude Bedrock for vision — it rejects base64 images
+      ...(hasImages && {
+        provider: { ignore: ['Amazon Bedrock'] },
+      }),
     }
+
+    console.log('[OpenRouter] Calling API...')
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
-        'HTTP-Referer': 'https://github.com/anthropics/claude-code',
-        'X-Title': 'Slack Assistant',
+        'HTTP-Referer': 'https://github.com/slack-samples/bolt-js-assistant-template',
+        'X-Title': 'Ticketron Slack Assistant',
       },
       body: JSON.stringify(body),
     })
@@ -263,32 +305,48 @@ export class OpenRouterLlm extends BaseLlm {
       const decoder = new TextDecoder()
       let buffer = ''
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
 
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6)
-            if (data === '[DONE]') {
-              return
-            }
-            try {
-              const chunk = JSON.parse(data)
-              yield this.convertToLlmResponse(chunk, true)
-            } catch {
-              // Skip invalid JSON
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (trimmed.startsWith('data: ')) {
+              const data = trimmed.slice(6)
+              if (data === '[DONE]') {
+                return
+              }
+              try {
+                const chunk = JSON.parse(data)
+                yield this.convertToLlmResponse(chunk, true)
+              } catch {
+                // Skip invalid JSON in SSE stream
+              }
             }
           }
         }
+      } finally {
+        // Always release the reader lock, even if the consumer breaks early
+        reader.cancel().catch(() => {})
       }
     } else {
-      const data = await response.json()
+      const raw = await response.text()
+      let data
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        console.log('[OpenRouter] Non-JSON response body:', raw.slice(0, 200))
+        yield {
+          errorCode: 'INVALID_RESPONSE',
+          errorMessage: `OpenRouter returned non-JSON: ${raw.slice(0, 200)}`,
+        }
+        return
+      }
       const llmResponse = this.convertToLlmResponse(data, false)
 
       yield llmResponse

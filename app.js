@@ -23,5 +23,20 @@ registerListeners(app)
     app.logger.info('⚡️ Bolt app is running!')
   } catch (error) {
     app.logger.error('Failed to start the app', error)
+    process.exit(1)
   }
 })()
+
+// Graceful shutdown — stop Bolt (closes the WebSocket) so the MCP stdio
+// subprocess spawned by npx is not left orphaned on SIGTERM / SIGINT.
+async function shutdown(signal) {
+  app.logger.info(`Received ${signal}, shutting down…`)
+  try {
+    await app.stop()
+  } finally {
+    process.exit(0)
+  }
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT', () => shutdown('SIGINT'))

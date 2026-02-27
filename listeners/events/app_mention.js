@@ -1,28 +1,34 @@
 import { InMemorySessionService, Runner, stringifyContent } from '@google/adk'
 import { getAgent } from '../../ai/index.js'
 import { feedbackBlock } from '../views/feedback_block.js'
+import { downloadImages } from './download_images.js'
 import { ticketActionsBlock } from '../views/ticket_actions.js'
 
 // Session service for Google ADK (created immediately - no external deps)
 const sessionService = new InMemorySessionService()
 
-// Runner created lazily on first use (waits for MCP connection)
-let runner = null
+// Promise-based singleton to prevent race conditions on concurrent first calls.
+/** @type {Promise<Runner> | null} */
+let runnerPromise = null
 
 /**
  * Get the runner, creating it lazily on first use.
+ * Safe to call concurrently — only one Runner is ever created.
  * @returns {Promise<Runner>}
  */
 async function getRunner() {
-  if (!runner) {
-    const agent = await getAgent()
-    runner = new Runner({
-      appName: 'slack-assistant',
-      agent,
-      sessionService,
-    })
+  if (!runnerPromise) {
+    runnerPromise = getAgent().then(
+      (agent) =>
+        new Runner({
+          appName: 'slack-assistant',
+          agent,
+          sessionService,
+        }),
+    )
+    runnerPromise.catch(() => { runnerPromise = null })
   }
-  return runner
+  return runnerPromise
 }
 
 /**
@@ -169,13 +175,23 @@ export async function runAgentWithMessage({
     await streamer.append({ markdown_text: displayMessage })
 
     // Show Create/Cancel buttons only when in draft stage
-    // Pass ticket data in the button value for the modal
+    // Pass ticket data in the button value for the modal.
+    // Slack enforces a 2000-char limit on button values, so truncate the
+    // description field if the serialised payload would exceed that limit.
     let blocks
     if (stage === 'draft' && ticket) {
-      const buttonData = JSON.stringify({ sessionId, ticket })
+      const SLACK_VALUE_LIMIT = 2000
+      let safeTicket = ticket
+      let buttonData = JSON.stringify({ sessionId, ticket: safeTicket })
+      if (buttonData.length > SLACK_VALUE_LIMIT && safeTicket.description) {
+        const overhead = buttonData.length - safeTicket.description.length
+        const maxDescLen = Math.max(0, SLACK_VALUE_LIMIT - overhead - 3) // 3 for '...'
+        safeTicket = { ...safeTicket, description: safeTicket.description.slice(0, maxDescLen) + '...' }
+        buttonData = JSON.stringify({ sessionId, ticket: safeTicket })
+      }
       console.log(
         '\x1b[36m%s\x1b[0m',
-        `[runAgentWithMessage] Adding ticket action buttons with data: ${buttonData}`,
+        `[runAgentWithMessage] Adding ticket action buttons (dataLen=${buttonData.length})`,
       )
       blocks = [ticketActionsBlock(buttonData), feedbackBlock]
     } else {
@@ -193,13 +209,17 @@ export async function runAgentWithMessage({
       `[runAgentWithMessage] ERROR: ${error.message}`,
     )
     console.error(error)
-    // If an error occurs, send an error message to the channel
-    await client.chat.postMessage({
-      channel: channel,
-      thread_ts: thread_ts,
-      text: `Sorry, something went wrong! ${error}`,
-    })
-    throw error
+    // Post the error to the channel — do not re-throw; callers (appMentionCallback,
+    // confirmTicketCallback) each have their own catch that would post a second message.
+    try {
+      await client.chat.postMessage({
+        channel: channel,
+        thread_ts: thread_ts,
+        text: `Sorry, something went wrong! ${error}`,
+      })
+    } catch (postError) {
+      console.error('[runAgentWithMessage] Failed to post error message:', postError)
+    }
   }
 }
 
@@ -229,7 +249,6 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       '\x1b[90m%s\x1b[0m',
       `[appMention] thread_ts=${thread_ts} (isThread=${!!event.thread_ts})`,
     )
-    console.log({ event })
     // Create or get a session for this thread
     const sessionId = `${channel}-${thread_ts}`
     let session = await sessionService.getSession({
@@ -286,46 +305,12 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       .join('\n')
     const userInput = threadContext ? `${threadContext}\n${text}` : text
 
-    // Download supported image attachments (screenshots, photos — not GIFs)
-    // Cast needed: @slack/types defines files as { id: string }[] but runtime objects include full file metadata
-    const supportedImageTypes = new Set([
-      'image/png',
-      'image/jpeg',
-      'image/webp',
-    ])
-    /** @type {Array<{mimetype: string, url_private: string, name: string}>} */
-    const files = /** @type {any} */ (event.files || [])
-    const imageFiles = files.filter((f) => supportedImageTypes.has(f.mimetype))
-    /** @type {Array<{mimeType: string, data: string}>} */
-    const images = []
-    for (const file of imageFiles) {
-      try {
-        const resp = await fetch(file.url_private, {
-          headers: { Authorization: `Bearer ${client.token}` },
-        })
-        if (!resp.ok) {
-          console.log(
-            '\x1b[33m%s\x1b[0m',
-            `[appMention] Failed to download file ${file.name}: ${resp.status}`,
-          )
-          continue
-        }
-        const buffer = await resp.arrayBuffer()
-        images.push({
-          mimeType: file.mimetype,
-          data: Buffer.from(buffer).toString('base64'),
-        })
-        console.log(
-          '\x1b[32m%s\x1b[0m',
-          `[appMention] Downloaded image: ${file.name} (${file.mimetype})`,
-        )
-      } catch (err) {
-        console.log(
-          '\x1b[33m%s\x1b[0m',
-          `[appMention] Error downloading file ${file.name}: ${err.message}`,
-        )
-      }
-    }
+    // const images = await downloadImages({
+    //   threadMessages,
+    //   event,
+    //   token: client.token,
+    // })
+    const images = [] // Disable image downloading for now to avoid issues with ADK vision requests
 
     console.log(
       '\x1b[34m%s\x1b[0m',

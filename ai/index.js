@@ -21,42 +21,51 @@ export const sessionManager = new CachedMCPSessionManager({
   },
 })
 
-// Lazy initialization - don't connect at startup
-let mcpClient = null
-let atlassianTools = null
-let rootAgent = null
+// Promise-based singletons to prevent race conditions on concurrent first calls.
+// Using promises (not plain values) means the second caller awaits the same
+// in-flight initialization rather than starting a second one.
+/** @type {Promise<MCPTool[]> | null} */
+let toolsPromise = null
+/** @type {Promise<LlmAgent> | null} */
+let agentPromise = null
 
 /**
  * Get MCP tools, connecting to Atlassian if needed.
+ * Safe to call concurrently — only one MCP connection is ever created.
  * @returns {Promise<MCPTool[]>}
  */
 async function getTools() {
-  if (!atlassianTools) {
-    console.log('\x1b[36m%s\x1b[0m', '[ai] Connecting to Atlassian MCP...')
-    mcpClient = await sessionManager.createSession()
-    const { tools: mcpTools } = await mcpClient.listTools()
-    atlassianTools = mcpTools
-      .filter((t) => TOOL_FILTER.has(t.name))
-      .map((t) => new MCPTool(t, /** @type {any} */ (sessionManager)))
-    console.log(
-      '\x1b[32m%s\x1b[0m',
-      `[ai] Connected! ${atlassianTools.length} tools available.`,
-    )
+  if (!toolsPromise) {
+    toolsPromise = (async () => {
+      console.log('\x1b[36m%s\x1b[0m', '[ai] Connecting to Atlassian MCP...')
+      const mcpClient = await sessionManager.createSession()
+      const { tools: mcpTools } = await mcpClient.listTools()
+      const tools = mcpTools
+        .filter((t) => TOOL_FILTER.has(t.name))
+        .map((t) => new MCPTool(t, /** @type {any} */ (sessionManager)))
+      console.log(
+        '\x1b[32m%s\x1b[0m',
+        `[ai] Connected! ${tools.length} tools available.`,
+      )
+      return tools
+    })()
+    // Clear on failure so the next call retries
+    toolsPromise.catch(() => { toolsPromise = null })
   }
-  return atlassianTools
+  return toolsPromise
 }
 
 /**
  * Get the root agent, creating it lazily on first use.
- * This allows the app to start even if MCP auth isn't ready.
+ * Safe to call concurrently — only one agent is ever created.
  * @returns {Promise<LlmAgent>}
  */
 export async function getAgent() {
-  if (!rootAgent) {
-    const tools = await getTools()
-    rootAgent = createAgent(tools)
+  if (!agentPromise) {
+    agentPromise = getTools().then((tools) => createAgent(tools))
+    agentPromise.catch(() => { agentPromise = null })
   }
-  return rootAgent
+  return agentPromise
 }
 
 /**
@@ -171,6 +180,15 @@ NEVER skip Step 1. NEVER call createJiraIssue without explicit confirmation.
 ## CONFIGURATION
 - cloudId: https://ticketron.atlassian.net
 - Default projectKey: KAN
+
+## IMAGE HANDLING
+When the user attaches images (screenshots, photos — never GIFs or stickers), analyze them for ticket-relevant content only:
+- Extract any visible error messages, stack traces, or status codes and include them under **Technical Evidence**
+- Describe what the screenshot shows (e.g. UI state, broken layout, error dialog) in the **Summary**
+- Use visual details to inform **Steps to Reproduce** and **Expected vs. Actual Result**
+- If the image shows a UI issue, note the affected component/area in the title (e.g. "FE: Checkout page - broken layout on mobile")
+- If no text is provided with the image, infer the issue from the image content alone
+- Ignore images that are unrelated to the issue (memes, reactions, profile pictures, etc.) — do not reference them
 
 ## CONSTRAINTS
 - NEVER return anything other than valid JSON
