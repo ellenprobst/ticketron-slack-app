@@ -50,7 +50,9 @@ async function getTools() {
       return tools
     })()
     // Clear on failure so the next call retries
-    toolsPromise.catch(() => { toolsPromise = null })
+    toolsPromise.catch(() => {
+      toolsPromise = null
+    })
   }
   return toolsPromise
 }
@@ -63,7 +65,9 @@ async function getTools() {
 export async function getAgent() {
   if (!agentPromise) {
     agentPromise = getTools().then((tools) => createAgent(tools))
-    agentPromise.catch(() => { agentPromise = null })
+    agentPromise.catch(() => {
+      agentPromise = null
+    })
   }
   return agentPromise
 }
@@ -206,7 +210,14 @@ User: "Can you create a ticket for the login bug Sarah mentioned?"
 Response (DO NOT call any tools - just return the draft):
 {
   "stage": "draft",
-  "message": "Here's a draft ticket for the login bug. Reply 'create it' to confirm, or let me know if you'd like changes.",
+  "message":
+    "Here's a draft ticket for the login bug. Let's chat if you have some changes you'd like to make.
+    Title: ...
+    Description: ...
+    Priority: ...
+    Issue Type: ...
+    Project: ...
+    ",
   "ticket": {
     "title": "BE: Login fails with 500 error after password reset",
     "description": "## Summary\\nUsers are unable to log in after resetting their password. The login page returns a 500 error when attempting to sign in with new credentials.\\n\\n## Steps to Reproduce\\n1. Reset password via the forgot password flow\\n2. Attempt to log in with the new password\\n3. Observe 500 error on the login page\\n\\n## Expected vs. Actual Result\\n**Expected:** User logs in successfully with new credentials.\\n**Actual:** Login page returns a 500 error.\\n\\n## Possible Root Cause\\nThe password reset flow may not be correctly updating the credential store, causing the auth service to reject the new password.",

@@ -13,9 +13,18 @@ export function ticketActionsBlock(buttonData) {
         type: 'button',
         text: {
           type: 'plain_text',
-          text: 'Open Draft Ticket',
+          text: 'Create',
         },
         style: 'primary',
+        action_id: 'create_ticket',
+        value: buttonData,
+      },
+      {
+        type: 'button',
+        text: {
+          type: 'plain_text',
+          text: 'Edit',
+        },
         action_id: 'open_ticket_modal',
         value: buttonData,
       },
@@ -59,7 +68,7 @@ export function ticketModalView(ticket, privateMetadata) {
     },
     close: {
       type: 'plain_text',
-      text: 'Cancel',
+      text: 'Back',
     },
     blocks: [
       {
