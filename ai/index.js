@@ -106,7 +106,7 @@ Schema:
     "description": "string (markdown supported)",
     "priority": "Highest" | "High" | "Medium" | "Low" | "Lowest",
     "issueType": "Bug" | "Task" | "Story",
-    "projectKey": "string (default: KAN)"
+    "projectKey": "string (use the project key provided in the system context)"
   },
   "ticketUrl": "string: Direct URL (REQUIRED when stage is 'created')",
   "ticketKey": "string: Ticket key e.g. KAN-123 (REQUIRED when stage is 'created')"
@@ -182,8 +182,7 @@ NEVER skip Step 1. NEVER call createJiraIssue without explicit confirmation.
   - Task = general work, chores, maintenance
 
 ## CONFIGURATION
-- cloudId: https://ticketron.atlassian.net
-- Default projectKey: KAN
+The Jira instance URL and default project key are provided at the start of each conversation as system context. Use exactly those values for all Jira operations.
 
 ## IMAGE HANDLING
 When the user attaches images (screenshots, photos — never GIFs or stickers), analyze them for ticket-relevant content only:

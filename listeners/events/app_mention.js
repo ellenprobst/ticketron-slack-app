@@ -1,7 +1,7 @@
 import { InMemorySessionService, Runner, stringifyContent } from '@google/adk'
 import { getAgent } from '../../ai/index.js'
+import { getJiraConfig } from '../../config/channel_jira_map_utils.js'
 import { feedbackBlock } from '../views/feedback_block.js'
-import { downloadImages } from './download_images.js'
 import { ticketActionsBlock } from '../views/ticket_actions.js'
 
 // Session service for Google ADK (created immediately - no external deps)
@@ -26,7 +26,9 @@ async function getRunner() {
           sessionService,
         }),
     )
-    runnerPromise.catch(() => { runnerPromise = null })
+    runnerPromise.catch(() => {
+      runnerPromise = null
+    })
   }
   return runnerPromise
 }
@@ -186,7 +188,10 @@ export async function runAgentWithMessage({
       if (buttonData.length > SLACK_VALUE_LIMIT && safeTicket.description) {
         const overhead = buttonData.length - safeTicket.description.length
         const maxDescLen = Math.max(0, SLACK_VALUE_LIMIT - overhead - 3) // 3 for '...'
-        safeTicket = { ...safeTicket, description: safeTicket.description.slice(0, maxDescLen) + '...' }
+        safeTicket = {
+          ...safeTicket,
+          description: safeTicket.description.slice(0, maxDescLen) + '...',
+        }
         buttonData = JSON.stringify({ sessionId, ticket: safeTicket })
       }
       console.log(
@@ -218,7 +223,10 @@ export async function runAgentWithMessage({
         text: `Sorry, something went wrong! ${error}`,
       })
     } catch (postError) {
-      console.error('[runAgentWithMessage] Failed to post error message:', postError)
+      console.error(
+        '[runAgentWithMessage] Failed to post error message:',
+        postError,
+      )
     }
   }
 }
@@ -241,6 +249,7 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
   try {
     const { channel, text, team, user } = event
     const thread_ts = event.thread_ts || event.ts
+    console.log(event, channel, text, team, user)
     console.log(
       '\x1b[36m%s\x1b[0m',
       `\n━━━ [appMention] New mention from user=${user} in channel=${channel} ━━━`,
@@ -249,6 +258,17 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       '\x1b[90m%s\x1b[0m',
       `[appMention] thread_ts=${thread_ts} (isThread=${!!event.thread_ts})`,
     )
+
+    // Resolve channel name for Jira config lookup (requires channels:read scope;
+    // fall back to empty string → default Jira config if scope is missing)
+    let channelName = ''
+    // try {
+    //   const { channel: channelInfo } = await client.conversations.info({ channel })
+    //   channelName = channelInfo?.name ?? ''
+    // } catch (e) {
+    //   console.log('\x1b[33m%s\x1b[0m', `[appMention] Could not resolve channel name (${e.data?.error ?? e.message}), using default Jira config`)
+    // }
+
     // Create or get a session for this thread
     const sessionId = `${channel}-${thread_ts}`
     let session = await sessionService.getSession({
@@ -303,7 +323,17 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
     const threadContext = threadMessages
       .map((message) => `${message.user}: ${message.text}`)
       .join('\n')
-    const userInput = threadContext ? `${threadContext}\n${text}` : text
+    let userInput = threadContext ? `${threadContext}\n${text}` : text
+
+    // Prepend Jira config as system context on the first message of a session
+    // if (isFreshSession) {
+    //   const jiraConfig = getJiraConfig(channelName)
+    //   console.log(
+    //     '\x1b[33m%s\x1b[0m',
+    //     `[appMention] Jira config for channel "${channelName}": instance=${jiraConfig.instance} project=${jiraConfig.project}`,
+    //   )
+    //   userInput = `[System context — Jira config for this channel]\ninstance: ${jiraConfig.instance}\nproject: ${jiraConfig.project}\n\n${userInput}`
+    // }
 
     // const images = await downloadImages({
     //   threadMessages,
