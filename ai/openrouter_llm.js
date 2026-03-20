@@ -80,6 +80,7 @@ export class OpenRouterLlm extends BaseLlm {
           const name = p.functionResponse.name
           const count = responseNameCount[name] ?? 0
           responseNameCount[name] = count + 1
+          console.log(`[OpenRouter] Tool response: ${name}`, JSON.stringify(p.functionResponse.response, null, 2))
           messages.push({
             role: 'tool',
             tool_call_id: `call_${name}_${count}`,
@@ -187,6 +188,7 @@ export class OpenRouterLlm extends BaseLlm {
     if (delta?.tool_calls) {
       for (const toolCall of delta.tool_calls) {
         if (toolCall.function) {
+          /** @type {Record<string, unknown>} */
           let args = {}
           if (toolCall.function.arguments) {
             try {
@@ -200,6 +202,7 @@ export class OpenRouterLlm extends BaseLlm {
               )
             }
           }
+          console.log(`[OpenRouter] Tool call: ${toolCall.function.name}`, JSON.stringify(args, null, 2))
           parts.push({
             functionCall: {
               name: toolCall.function.name,
@@ -217,7 +220,9 @@ export class OpenRouterLlm extends BaseLlm {
       content: parts.length > 0 ? { role: 'model', parts } : undefined,
       partial: isStreaming && !isComplete,
       turnComplete: isComplete,
-      finishReason: isComplete ? 'STOP' : undefined,
+      finishReason: isComplete
+        ? /** @type {import('@google/genai').FinishReason} */ ('STOP')
+        : undefined,
       usageMetadata: chunk.usage
         ? {
             promptTokenCount: chunk.usage.prompt_tokens,
@@ -251,11 +256,15 @@ export class OpenRouterLlm extends BaseLlm {
 
     // Check if any message contains image content
     const hasImages = messages.some(
-      (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'),
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some((p) => p.type === 'image_url'),
     )
 
     if (hasImages) {
-      console.log('[OpenRouter] Vision request detected — excluding Bedrock provider')
+      console.log(
+        '[OpenRouter] Vision request detected — excluding Bedrock provider',
+      )
     }
 
     const body = {
@@ -282,7 +291,8 @@ export class OpenRouterLlm extends BaseLlm {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
-        'HTTP-Referer': 'https://github.com/slack-samples/bolt-js-assistant-template',
+        'HTTP-Referer':
+          'https://github.com/slack-samples/bolt-js-assistant-template',
         'X-Title': 'Ticketron Slack Assistant',
       },
       body: JSON.stringify(body),
@@ -355,6 +365,7 @@ export class OpenRouterLlm extends BaseLlm {
 
   /**
    * Live connections not supported for OpenRouter.
+   * @returns {Promise<import('@google/adk').BaseLlmConnection>}
    */
   async connect(_llmRequest) {
     throw new Error('Live connections are not supported for OpenRouter')

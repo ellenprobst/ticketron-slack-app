@@ -98,15 +98,29 @@ export async function runAgentWithMessage({
         `[runAgentWithMessage] Reusing existing session: ${sessionId}`,
       )
     }
+
+    // On the first message in a session, prepend the Jira board URL so the agent
+    // knows which board to target for this channel. Only done once — the session
+    // retains this context for all subsequent turns.
+    const isFreshSession = session.events.length === 0
+    let messageText = text
+    if (isFreshSession) {
+      try {
+        const { channel: channelInfo } = await client.conversations.info({ channel })
+        const channelName = channelInfo?.name ?? ''
+        const { instance, project, boardUrl } = getJiraConfig(channelName)
+        messageText = `[SYSTEM CONTEXT — Jira configuration for this channel:\n- Instance: ${instance}\n- Project key: ${project}\n- Board URL: ${boardUrl}\nYou MUST use ONLY this instance and project key for all Jira operations in this conversation. Do not use any other Jira instance or project.]\n${text}`
+        console.log('\x1b[36m%s\x1b[0m', `[runAgentWithMessage] Injected Jira config: instance=${instance} project=${project} (channel="${channelName}")`)
+      } catch (e) {
+        console.log('\x1b[33m%s\x1b[0m', `[runAgentWithMessage] Could not resolve channel name (${e.data?.error ?? e.message}), skipping Jira context`)
+      }
+    }
+
     // Run the agent with the user's message
     const agentRunner = await getRunner()
     /** @type {Array<Object>} */
-    const parts = [{ text: text || 'Describe this image' }]
-    if (images?.length) {
-      for (const img of images) {
-        parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
-      }
-    }
+    const parts = [{ text: messageText }]
+
     const events = agentRunner.runAsync({
       userId: user,
       sessionId: session.id,
@@ -249,7 +263,6 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
   try {
     const { channel, text, team, user } = event
     const thread_ts = event.thread_ts || event.ts
-    console.log(event, channel, text, team, user)
     console.log(
       '\x1b[36m%s\x1b[0m',
       `\n━━━ [appMention] New mention from user=${user} in channel=${channel} ━━━`,
@@ -258,16 +271,6 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
       '\x1b[90m%s\x1b[0m',
       `[appMention] thread_ts=${thread_ts} (isThread=${!!event.thread_ts})`,
     )
-
-    // Resolve channel name for Jira config lookup (requires channels:read scope;
-    // fall back to empty string → default Jira config if scope is missing)
-    let channelName = ''
-    // try {
-    //   const { channel: channelInfo } = await client.conversations.info({ channel })
-    //   channelName = channelInfo?.name ?? ''
-    // } catch (e) {
-    //   console.log('\x1b[33m%s\x1b[0m', `[appMention] Could not resolve channel name (${e.data?.error ?? e.message}), using default Jira config`)
-    // }
 
     // Create or get a session for this thread
     const sessionId = `${channel}-${thread_ts}`
@@ -323,29 +326,9 @@ export const appMentionCallback = async ({ event, client, logger, say }) => {
     const threadContext = threadMessages
       .map((message) => `${message.user}: ${message.text}`)
       .join('\n')
-    let userInput = threadContext ? `${threadContext}\n${text}` : text
+    const userInput = threadContext ? `${threadContext}\n${text}` : text
 
-    // Prepend Jira config as system context on the first message of a session
-    // if (isFreshSession) {
-    //   const jiraConfig = getJiraConfig(channelName)
-    //   console.log(
-    //     '\x1b[33m%s\x1b[0m',
-    //     `[appMention] Jira config for channel "${channelName}": instance=${jiraConfig.instance} project=${jiraConfig.project}`,
-    //   )
-    //   userInput = `[System context — Jira config for this channel]\ninstance: ${jiraConfig.instance}\nproject: ${jiraConfig.project}\n\n${userInput}`
-    // }
-
-    // const images = await downloadImages({
-    //   threadMessages,
-    //   event,
-    //   token: client.token,
-    // })
     const images = [] // Disable image downloading for now to avoid issues with ADK vision requests
-
-    console.log(
-      '\x1b[34m%s\x1b[0m',
-      `[appMention] Calling runAgentWithMessage (inputLength=${userInput.length}, images=${images.length})`,
-    )
 
     await runAgentWithMessage({
       channel,

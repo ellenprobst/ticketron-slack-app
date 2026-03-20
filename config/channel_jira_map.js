@@ -4,8 +4,15 @@
  *
  * @type {Array<{match: string, type: 'exact' | 'prefix' | 'default', instance: string, project: string}>}
  */
-export default [
-  { match: 'eng-', type: 'prefix', instance: 'eng.atlassian.net', project: 'ENG' },
-  { match: 'ops-', type: 'prefix', instance: 'ops.atlassian.net', project: 'OPS' },
-  { match: 'default', type: 'default', instance: 'ticketron.atlassian.net', project: 'KAN' },
-];
+export default {
+  'barr-rmp-build':
+    'https://firetrail.atlassian.net/jira/software/c/projects/BRMP/boards/304',
+  'barr-rmp-build-engineering':
+    'https://firetrail.atlassian.net/jira/software/c/projects/BRMP/boards/304',
+  'barr-rmp-product-design':
+    'https://firetrail.atlassian.net/jira/software/c/projects/BRMP/boards/370',
+  'barr-production-issues':
+    'https://kablamo.atlassian.net/jira/servicedesk/projects/BRS/queues/custom/199',
+  ticketron:
+    'https://ticketron.atlassian.net/jira/software/projects/KAN/boards/1',
+}

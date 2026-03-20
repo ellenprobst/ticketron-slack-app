@@ -1,29 +1,31 @@
 import channelJiraMap from './channel_jira_map.js';
 
 /**
- * @typedef {{ instance: string, project: string }} JiraConfig
+ * @typedef {{ instance: string, project: string, boardUrl: string }} JiraConfig
  */
+
+const URL_RE = /https?:\/\/([^/]+)\/.*?\/projects\/([^/]+)\//;
+
+/**
+ * Parses a Jira board URL into instance hostname and project key.
+ * @param {string} url
+ * @returns {{ instance: string, project: string }}
+ */
+function parseJiraUrl(url) {
+  const m = url.match(URL_RE);
+  if (m) return { instance: m[1], project: m[2] };
+  // Fallback: return the raw URL as instance
+  return { instance: url, project: '' };
+}
 
 /**
  * Resolves the Jira config for a given Slack channel name.
- * Resolution order: exact match → prefix match → default.
+ * Falls back to the 'ticketron' entry if no match is found.
  *
- * @param {string} channelName - The Slack channel name (e.g. 'eng-bugs').
+ * @param {string} channelName - The Slack channel name (e.g. 'barr-rmp-build').
  * @returns {JiraConfig}
  */
 export function getJiraConfig(channelName) {
-  // 1. Exact match
-  const exact = channelJiraMap.find((e) => e.type === 'exact' && e.match === channelName);
-  if (exact) return { instance: exact.instance, project: exact.project };
-
-  // 2. Prefix match
-  const prefix = channelJiraMap.find((e) => e.type === 'prefix' && channelName.startsWith(e.match));
-  if (prefix) return { instance: prefix.instance, project: prefix.project };
-
-  // 3. Default fallback
-  const fallback = channelJiraMap.find((e) => e.type === 'default');
-  if (fallback) return { instance: fallback.instance, project: fallback.project };
-
-  // Should never reach here if map has a default entry
-  return { instance: 'ticketron.atlassian.net', project: 'KAN' };
+  const boardUrl = channelJiraMap[channelName] ?? channelJiraMap['ticketron'];
+  return { ...parseJiraUrl(boardUrl), boardUrl };
 }

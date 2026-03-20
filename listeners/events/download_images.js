@@ -1,8 +1,4 @@
-const SUPPORTED_IMAGE_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-])
+const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 /**
  * Downloads a single Slack file, handling Enterprise Grid redirects.

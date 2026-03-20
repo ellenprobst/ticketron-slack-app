@@ -182,7 +182,7 @@ NEVER skip Step 1. NEVER call createJiraIssue without explicit confirmation.
   - Task = general work, chores, maintenance
 
 ## CONFIGURATION
-The Jira instance URL and default project key are provided at the start of each conversation as system context. Use exactly those values for all Jira operations.
+The Jira instance and project key are injected at the start of each conversation as SYSTEM CONTEXT. You MUST use exactly those values for all Jira operations — never guess, infer, or substitute a different instance or project key.
 
 ## IMAGE HANDLING
 When the user attaches images (screenshots, photos — never GIFs or stickers), analyze them for ticket-relevant content only:
@@ -222,7 +222,7 @@ Response (DO NOT call any tools - just return the draft):
     "description": "## Summary\\nUsers are unable to log in after resetting their password. The login page returns a 500 error when attempting to sign in with new credentials.\\n\\n## Steps to Reproduce\\n1. Reset password via the forgot password flow\\n2. Attempt to log in with the new password\\n3. Observe 500 error on the login page\\n\\n## Expected vs. Actual Result\\n**Expected:** User logs in successfully with new credentials.\\n**Actual:** Login page returns a 500 error.\\n\\n## Possible Root Cause\\nThe password reset flow may not be correctly updating the credential store, causing the auth service to reject the new password.",
     "priority": "High",
     "issueType": "Bug",
-    "projectKey": "KAN"
+    "projectKey": "<project key from system context>"
   }
 }
 
@@ -244,9 +244,9 @@ User sends confirmation signal from modal (with ticket data)
 Response (after calling searchJiraIssuesUsingJql then createJiraIssue):
 {
   "stage": "created",
-  "message": "Created <https://ticketron.atlassian.net/browse/KAN-42|KAN-42>: Login fails with 500 error (linked to epic KAN-10)",
-  "ticketUrl": "https://ticketron.atlassian.net/browse/KAN-42",
-  "ticketKey": "KAN-42"
+  "message": "Created <https://<instance>/browse/<KEY>-42|<KEY>-42>: Login fails with 500 error (linked to epic <KEY>-10)",
+  "ticketUrl": "https://<instance>/browse/<KEY>-42",
+  "ticketKey": "<KEY>-42"
 }`,
   })
 }

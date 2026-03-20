@@ -24,9 +24,11 @@
         "assistant:write",
         "channels:history",
         "channels:join",
+        "channels:read",
         "chat:write",
-        "im:history",
-        "groups:history"
+        "groups:history",
+        "groups:read",
+        "im:history"
       ]
     }
   },
