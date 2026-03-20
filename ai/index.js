@@ -13,11 +13,21 @@ const TOOL_FILTER = new Set([
 ])
 
 // Session manager for MCP connection (lazy init)
+const atlassianToken = Buffer.from(
+  `${process.env.ATLASSIAN_EMAIL}:${process.env.ATLASSIAN_API_TOKEN}`,
+).toString('base64')
+
 export const sessionManager = new CachedMCPSessionManager({
   type: 'StdioConnectionParams',
   serverParams: {
     command: 'npx',
-    args: ['-y', 'mcp-remote', 'https://mcp.atlassian.com/v1/sse'],
+    args: [
+      '-y',
+      'mcp-remote',
+      'https://mcp.atlassian.com/v1/mcp',
+      '--header',
+      `Authorization: Basic ${atlassianToken}`,
+    ],
   },
 })
 
@@ -40,9 +50,19 @@ async function getTools() {
       console.log('\x1b[36m%s\x1b[0m', '[ai] Connecting to Atlassian MCP...')
       const mcpClient = await sessionManager.createSession()
       const { tools: mcpTools } = await mcpClient.listTools()
+      console.log(
+        '\x1b[36m%s\x1b[0m',
+        `[ai] MCP tools returned: ${mcpTools.map((t) => t.name).join(', ') || '(none)'}`,
+      )
       const tools = mcpTools
         .filter((t) => TOOL_FILTER.has(t.name))
         .map((t) => new MCPTool(t, /** @type {any} */ (sessionManager)))
+      if (tools.length === 0) {
+        throw new Error(
+          `MCP returned ${mcpTools.length} tools but none matched TOOL_FILTER. ` +
+            `Available: [${mcpTools.map((t) => t.name).join(', ')}]`,
+        )
+      }
       console.log(
         '\x1b[32m%s\x1b[0m',
         `[ai] Connected! ${tools.length} tools available.`,
@@ -125,11 +145,12 @@ When user mentions creating a ticket:
 
 **Step 2: CREATE (after modal confirmation signal)**
 When you receive a confirmation signal from the Slack modal (the app will send this):
-1. Use searchJiraIssuesUsingJql to find a matching parent epic
-2. Call createJiraIssue with the parent epic key (if found)
-3. Return stage: "created" with the ticket URL and key
+1. Use searchJiraIssuesUsingJql to find a matching parent epic — this is ONLY to get the parent key, do NOT return this ticket's URL
+2. Call createJiraIssue — this creates the NEW ticket; the response contains the new ticket key and URL
+3. Return stage: "created" with the ticketUrl and ticketKey FROM THE createJiraIssue RESPONSE — never from the search result
 
 NEVER skip Step 1. NEVER call createJiraIssue without explicit confirmation.
+NEVER return a URL or key from searchJiraIssuesUsingJql as the created ticket — those are existing tickets, not the one you just created.
 
 ## DECISION LOGIC
 
@@ -139,9 +160,10 @@ NEVER skip Step 1. NEVER call createJiraIssue without explicit confirmation.
    → Wait for confirmation
 
 2. User confirms ticket creation (app sends confirmation signal from modal):
-   → Search for a matching parent epic using searchJiraIssuesUsingJql
-   → Call createJiraIssue (with parent epic if found)
-   → Return stage: "created" with ticketUrl and ticketKey
+   → Search for a matching parent epic using searchJiraIssuesUsingJql (to get parent key only)
+   → Call createJiraIssue (with parent epic if found) — this creates the NEW ticket
+   → The createJiraIssue response contains the new ticket's key and URL — use THOSE values
+   → Return stage: "created" with ticketUrl and ticketKey FROM createJiraIssue, not from search
    → CRITICAL: The message MUST include a clickable link: <URL|KEY>
 
 3. User wants to edit an existing ticket:
