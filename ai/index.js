@@ -1,81 +1,10 @@
-import { LlmAgent, MCPTool } from '@google/adk'
+import { LlmAgent } from '@google/adk';
 // Import to register OpenRouterLlm with LLMRegistry
-import './openrouter_llm.js'
-import { CachedMCPSessionManager } from './cached_mcp_session_manager.js'
+import './openrouter_llm.js';
+import { jiraTools } from './jira_tools.js';
 
-const TOOL_FILTER = new Set([
-  'createJiraIssue',
-  'getVisibleJiraProjects',
-  'getJiraProjectIssueTypesMetadata',
-  'searchJiraIssuesUsingJql',
-  'editJiraIssue',
-  'getJiraIssue',
-])
-
-// Session manager for MCP connection (lazy init)
-const atlassianToken = Buffer.from(
-  `${process.env.ATLASSIAN_EMAIL}:${process.env.ATLASSIAN_API_TOKEN}`,
-).toString('base64')
-
-export const sessionManager = new CachedMCPSessionManager({
-  type: 'StdioConnectionParams',
-  serverParams: {
-    command: 'npx',
-    args: [
-      '-y',
-      'mcp-remote',
-      'https://mcp.atlassian.com/v1/mcp',
-      '--header',
-      `Authorization: Basic ${atlassianToken}`,
-    ],
-  },
-})
-
-// Promise-based singletons to prevent race conditions on concurrent first calls.
-// Using promises (not plain values) means the second caller awaits the same
-// in-flight initialization rather than starting a second one.
-/** @type {Promise<MCPTool[]> | null} */
-let toolsPromise = null
 /** @type {Promise<LlmAgent> | null} */
-let agentPromise = null
-
-/**
- * Get MCP tools, connecting to Atlassian if needed.
- * Safe to call concurrently — only one MCP connection is ever created.
- * @returns {Promise<MCPTool[]>}
- */
-async function getTools() {
-  if (!toolsPromise) {
-    toolsPromise = (async () => {
-      console.log('\x1b[36m%s\x1b[0m', '[ai] Connecting to Atlassian MCP...')
-      const mcpClient = await sessionManager.createSession()
-      const { tools: mcpTools } = await mcpClient.listTools()
-      console.log(
-        '\x1b[36m%s\x1b[0m',
-        `[ai] MCP tools returned: ${mcpTools.map((t) => t.name).join(', ') || '(none)'}`,
-      )
-      const tools = mcpTools
-        .filter((t) => TOOL_FILTER.has(t.name))
-        .map((t) => new MCPTool(t, /** @type {any} */ (sessionManager)))
-      if (tools.length === 0) {
-        throw new Error(
-          `MCP returned ${mcpTools.length} tools but none matched TOOL_FILTER. ` +
-            `Available: [${mcpTools.map((t) => t.name).join(', ')}]`,
-        )
-      }
-      console.log(
-        '\x1b[32m%s\x1b[0m',
-        `[ai] Connected! ${tools.length} tools available.`,
-      )
-      return tools
-    })()
-    // Clear on failure so the next call retries
-    toolsPromise.catch(() => {
-      toolsPromise = null
-    })
-  }
-  return toolsPromise
-}
+let agentPromise = null;
 
 /**
  * Get the root agent, creating it lazily on first use.
@@ -84,12 +13,12 @@ async function getTools() {
  */
 export async function getAgent() {
   if (!agentPromise) {
-    agentPromise = getTools().then((tools) => createAgent(tools))
+    agentPromise = Promise.resolve(createAgent(jiraTools));
     agentPromise.catch(() => {
-      agentPromise = null
-    })
+      agentPromise = null;
+    });
   }
-  return agentPromise
+  return agentPromise;
 }
 
 /**
@@ -219,7 +148,7 @@ When the user attaches images (screenshots, photos — never GIFs or stickers), 
 - NEVER return anything other than valid JSON
 - NEVER call createJiraIssue without a confirmation signal - ALWAYS show draft first for new tickets
 - You CAN use Jira tools for: searching epics, editing existing tickets, looking up tickets
-- NEVER make up ticket keys or URLs - only use values from the Jira API
+- NEVER make up ticket keys or URLs - only use values returned by a tool call. If createJiraIssue has not been called and returned a key, you MUST NOT set stage to "created". Return stage "error" instead.
 - For non-ticket requests, politely redirect to ticket-related topics
 - NO placeholders like "[Insert Date Here]". If unknown, omit.
 - NO conversational filler in the JSON "message" when drafting; stay professional and proactive.
@@ -270,5 +199,5 @@ Response (after calling searchJiraIssuesUsingJql then createJiraIssue):
   "ticketUrl": "https://<instance>/browse/<KEY>-42",
   "ticketKey": "<KEY>-42"
 }`,
-  })
+  });
 }

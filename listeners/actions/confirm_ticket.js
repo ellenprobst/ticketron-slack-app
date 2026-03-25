@@ -1,4 +1,4 @@
-import { runAgentWithMessage } from '../events/app_mention.js'
+import { runAgentWithMessage } from '../events/app_mention.js';
 
 /**
  * Handles the ticket modal submission (callback_id: ticket_modal_submit).
@@ -11,29 +11,22 @@ import { runAgentWithMessage } from '../events/app_mention.js'
  * @param {Object} params.view - The submitted view.
  * @param {import("@slack/logger").Logger} params.logger - Logger instance.
  */
-export const confirmTicketCallback = async ({
-  ack,
-  body,
-  client,
-  view,
-  logger,
-}) => {
+export const confirmTicketCallback = async ({ ack, body, client, view, logger }) => {
   try {
-    await ack()
+    await ack();
 
-    const { channel, thread_ts } = JSON.parse(view.private_metadata)
-    const user = body.user.id
+    const { channel, thread_ts } = JSON.parse(view.private_metadata);
+    const user = body.user.id;
 
     // Extract values from the modal inputs
-    const values = view.state.values
-    const title = values.ticket_title.title_input.value
-    const description = values.ticket_description.description_input.value
-    const priority = values.ticket_priority.priority_input.selected_option.value
-    const issueType =
-      values.ticket_issue_type.issue_type_input.selected_option.value
-    const projectKey = values.ticket_project.project_input.value
+    const values = view.state.values;
+    const title = values.ticket_title.title_input.value;
+    const description = values.ticket_description.description_input.value;
+    const priority = values.ticket_priority.priority_input.selected_option.value;
+    const issueType = values.ticket_issue_type.issue_type_input.selected_option.value;
+    const projectKey = values.ticket_project.project_input.value;
 
-    const confirmationText = `create it with these details: title="${title}", description="${description}", priority=${priority}, issueType=${issueType}, projectKey=${projectKey}`
+    const confirmationText = `create it with these details: title="${title}", description="${description}", priority=${priority}, issueType=${issueType}, projectKey=${projectKey}`;
 
     // Send confirmation to agent with the (possibly edited) ticket data
     await runAgentWithMessage({
@@ -43,8 +36,8 @@ export const confirmTicketCallback = async ({
       text: confirmationText,
       client,
       team: body.user.team_id,
-    })
+    });
   } catch (error) {
-    logger.error(`:warning: Error confirming ticket: ${error}`)
+    logger.error(`:warning: Error confirming ticket: ${error}`);
   }
-}
+};

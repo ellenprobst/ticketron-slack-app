@@ -38,7 +38,7 @@ export function ticketActionsBlock(buttonData) {
         value: buttonData,
       },
     ],
-  }
+  };
 }
 
 /**
@@ -137,5 +137,5 @@ export function ticketModalView(ticket, privateMetadata) {
         },
       },
     ],
-  }
+  };
 }
