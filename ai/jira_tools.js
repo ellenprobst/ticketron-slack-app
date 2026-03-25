@@ -124,23 +124,22 @@ export const searchJiraIssuesUsingJql = new FunctionTool({
         type: 'number',
         description: 'Maximum number of results to return (default 20).',
       },
-      fields: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Field names to include in each result (default: summary, status, priority, issuetype, parent).',
-      },
     },
     required: ['jiraBaseUrl', 'jql'],
   },
-  execute: async ({ jiraBaseUrl, jql, maxResults = 20, fields }) => {
-    const resolvedFields = (fields ?? ['summary', 'status', 'priority', 'issuetype', 'parent', 'assignee']).join(',');
-    const params = new URLSearchParams({ jql, maxResults: String(maxResults), fields: resolvedFields });
-    const data = await jiraFetch(`${jiraBaseUrl}/rest/api/3/issue/search?${params}`);
+  execute: async ({ jiraBaseUrl, jql, maxResults = 20 }) => {
+    const data = await jiraFetch(`${jiraBaseUrl}/rest/api/3/search/jql`, {
+      method: 'POST',
+      body: JSON.stringify({ jql, maxResults, fields: ['summary', 'status', 'issuetype', 'parent'] }),
+    });
     return (data.issues ?? []).map((i) => ({
       key: i.key,
       id: i.id,
       url: `${jiraBaseUrl}/browse/${i.key}`,
-      fields: i.fields,
+      summary: i.fields?.summary,
+      status: i.fields?.status?.name,
+      issuetype: i.fields?.issuetype?.name,
+      parent: i.fields?.parent?.key ?? null,
     }));
   },
 });
