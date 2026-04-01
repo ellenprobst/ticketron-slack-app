@@ -75,14 +75,35 @@ export async function runAgentWithMessage({ channel, thread_ts, user, text, clie
       sessionId,
     });
     if (!session) {
-      console.log('\x1b[33m%s\x1b[0m', `[runAgentWithMessage] Creating new session: ${sessionId}`);
+      // Debug: dump session store to diagnose why lookup failed
+      const allSessions = await sessionService.listSessions({ appName: 'slack-assistant', userId: user });
+      const rawStore = sessionService.sessions;
+      const storeSnapshot = {};
+      for (const [app, users] of Object.entries(rawStore)) {
+        storeSnapshot[app] = {};
+        for (const [uid, sessions] of Object.entries(users)) {
+          storeSnapshot[app][uid] = Object.keys(sessions);
+        }
+      }
+      console.log(
+        '\x1b[33m%s\x1b[0m',
+        `[runAgentWithMessage] Creating new session: ${sessionId} (lookup: appName=slack-assistant userId=${user} sessionId=${sessionId})`,
+      );
+      console.log(
+        '\x1b[33m%s\x1b[0m',
+        `[runAgentWithMessage] Sessions for this user via listSessions: ${JSON.stringify(allSessions.sessions.map((s) => s.id))}`,
+      );
+      console.log(
+        '\x1b[33m%s\x1b[0m',
+        `[runAgentWithMessage] Raw session store: ${JSON.stringify(storeSnapshot)}`,
+      );
       session = await sessionService.createSession({
         appName: 'slack-assistant',
         userId: user,
         sessionId,
       });
     } else {
-      console.log('\x1b[32m%s\x1b[0m', `[runAgentWithMessage] Reusing existing session: ${sessionId}`);
+      console.log('\x1b[32m%s\x1b[0m', `[runAgentWithMessage] Reusing existing session: ${sessionId} (events=${session.events.length})`);
     }
 
     // On the first message in a session, prepend the Jira board URL so the agent
